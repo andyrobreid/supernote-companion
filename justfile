@@ -1,7 +1,8 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+set dotenv-load := true
 
 plugin_id := "supernote-companion"
-vault_plugins_dir := "{{env_var('HOME')}}/obsidian/noted-brain/plugins"
+vault_plugins_dir := env_var("OBSIDIAN_PLUGINS_DIR")
 dest_dir := "{{vault_plugins_dir}}/{{plugin_id}}"
 
 # Build plugin bundle
