@@ -5,8 +5,12 @@ plugin_id := "supernote-companion"
 vault_plugins_dir := env_var("OBSIDIAN_PLUGINS_DIR")
 dest_dir := "{{vault_plugins_dir}}/{{plugin_id}}"
 
+# Install dependencies using Bun lockfile
+bootstrap:
+	bun install
+
 # Build plugin bundle
-build:
+build: bootstrap
 	npm run build
 
 # Deploy this plugin to local Obsidian vault plugins directory
