@@ -5187,6 +5187,55 @@ var PdfConverter = class {
     }
   }
   /**
+   * Convert an existing .note file path using CLI and generate both .pdf and .md.
+   * Expects outputPdfPath to end with .pdf; markdown will be generated next to it with .md extension.
+   */
+  async convertFilePathWithCliPdfAndMarkdown(inputNotePath, outputPdfPath) {
+    var _a;
+    const startTime = Date.now();
+    if (this.mode !== "cli") {
+      return {
+        success: false,
+        error: 'PDF+Markdown CLI conversion requires converter mode "cli"',
+        conversionTimeMs: Date.now() - startTime
+      };
+    }
+    const cliPath = (_a = this.resolvedCliPath) != null ? _a : findCliTool(this.cliPath);
+    if (!cliPath) {
+      return {
+        success: false,
+        error: "supernote_pdf CLI not found. Install it with: cargo install supernote_pdf",
+        conversionTimeMs: Date.now() - startTime
+      };
+    }
+    this.resolvedCliPath = cliPath;
+    try {
+      const cmd = `"${cliPath}" --input "${inputNotePath}" --output "${outputPdfPath}" --pdf-and-markdown`;
+      const { stdout, stderr } = await execAsync(cmd);
+      if (stdout)
+        console.debug(`[converter-cli] stdout: ${stdout}`);
+      if (stderr)
+        console.debug(`[converter-cli] stderr: ${stderr}`);
+      const markdownPath = outputPdfPath.replace(/\.pdf$/i, ".md");
+      if (!fs.existsSync(outputPdfPath)) {
+        throw new Error(`Expected PDF output missing at ${outputPdfPath}`);
+      }
+      if (!fs.existsSync(markdownPath)) {
+        throw new Error(`Expected markdown output missing at ${markdownPath}`);
+      }
+      return {
+        success: true,
+        conversionTimeMs: Date.now() - startTime
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: `CLI conversion failed: ${error instanceof Error ? error.message : String(error)}`,
+        conversionTimeMs: Date.now() - startTime
+      };
+    }
+  }
+  /**
    * Convert using the built-in TypeScript implementation
    */
   async convertWithBuiltin(noteData, noteId) {
@@ -5446,7 +5495,7 @@ Make sure Browse & Access is enabled on your Supernote.`);
   createSyncSettings(containerEl) {
     new import_obsidian2.Setting(containerEl).setHeading().setName("Sync configuration");
     new import_obsidian2.Setting(containerEl).setName("Import mode").setDesc("How to import notes from your Supernote").addDropdown(
-      (dropdown) => dropdown.addOption("pdf-only", "PDF only (recommended)").addOption("markdown-with-pdf", "Markdown + PDF attachment").addOption("markdown-only", "Markdown only (no PDF)").setValue(this.plugin.settings.importMode).onChange(async (value) => {
+      (dropdown) => dropdown.addOption("pdf-only", "PDF only (recommended)").addOption("pdf-note-and-cli-markdown", "PDF + .note backup + CLI markdown").addOption("markdown-with-pdf", "Markdown + PDF attachment").addOption("markdown-only", "Markdown only (no PDF)").setValue(this.plugin.settings.importMode).onChange(async (value) => {
         this.plugin.settings.importMode = value;
         await this.plugin.saveSettings();
         this.display();
@@ -5555,7 +5604,7 @@ Make sure Browse & Access is enabled on your Supernote.`);
     });
   }
   createExportSettings(containerEl) {
-    if (this.plugin.settings.importMode === "pdf-only") {
+    if (this.plugin.settings.importMode === "pdf-only" || this.plugin.settings.importMode === "pdf-note-and-cli-markdown") {
       return;
     }
     new import_obsidian2.Setting(containerEl).setHeading().setName("Markdown options");
@@ -5752,6 +5801,10 @@ function generateFilename(note, template) {
 function generatePdfFilename(note, template) {
   const result = applyFilenameTemplate(note, template || "{date} {name}");
   return `${result}.pdf`;
+}
+function generateNoteFilename(note, template) {
+  const result = applyFilenameTemplate(note, template || "{date} {name}");
+  return `${result}.note`;
 }
 function applyFilenameTemplate(note, template) {
   var _a;
@@ -7146,6 +7199,8 @@ var NoteImporter = class {
     switch (this.importMode) {
       case "pdf-only":
         return this.importPdfOnly(note);
+      case "pdf-note-and-cli-markdown":
+        return this.importPdfNoteAndCliMarkdown(note);
       case "markdown-with-pdf":
         return this.importMarkdownWithPdf(note);
       case "markdown-only":
@@ -7179,6 +7234,58 @@ var NoteImporter = class {
       }
     }
     return (0, import_obsidian9.normalizePath)(`${normalizedBase}/${filename}`);
+  }
+  getVaultBasePath() {
+    const adapter = this.vault.adapter;
+    if (adapter && typeof adapter.getBasePath === "function") {
+      return adapter.getBasePath();
+    }
+    throw new Error("Desktop vault base path unavailable. This plugin is desktop-only for CLI conversion workflows.");
+  }
+  /**
+   * Import .note backup + CLI-generated PDF + CLI-generated markdown from recognized text.
+   */
+  async importPdfNoteAndCliMarkdown(note) {
+    try {
+      const noteData = await this.client.downloadNoteFile(note.path);
+      const noteFilename = generateNoteFilename(note, this.filenameTemplate);
+      const noteVaultPath = this.buildVaultPath(this.notesFolder, note, noteFilename);
+      const folderPath = noteVaultPath.substring(0, noteVaultPath.lastIndexOf("/"));
+      if (folderPath) {
+        await this.ensureFolderExists(folderPath);
+      }
+      const existingNote = this.vault.getAbstractFileByPath(noteVaultPath);
+      if (existingNote instanceof import_obsidian9.TFile) {
+        await this.vault.modifyBinary(existingNote, noteData);
+      } else {
+        await this.vault.createBinary(noteVaultPath, noteData);
+      }
+      const basePath = this.getVaultBasePath();
+      const noteAbsolutePath = path2.join(basePath, noteVaultPath);
+      const pdfVaultPath = noteVaultPath.replace(/\.note$/i, ".pdf");
+      const pdfAbsolutePath = path2.join(basePath, pdfVaultPath);
+      const markdownVaultPath = pdfVaultPath.replace(/\.pdf$/i, ".md");
+      const conversionResult = await this.pdfConverter.convertFilePathWithCliPdfAndMarkdown(
+        noteAbsolutePath,
+        pdfAbsolutePath
+      );
+      if (!conversionResult.success) {
+        throw new Error(conversionResult.error || "Unknown CLI conversion error");
+      }
+      return {
+        success: true,
+        note,
+        notePath: noteVaultPath,
+        pdfPath: pdfVaultPath,
+        markdownPath: markdownVaultPath
+      };
+    } catch (error) {
+      return {
+        success: false,
+        note,
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
   }
   /**
    * Import just the PDF file (simplest mode)
@@ -7328,6 +7435,9 @@ var NoteImporter = class {
     var _a;
     if (this.importMode === "pdf-only") {
       return this.importPdfOnly(note);
+    }
+    if (this.importMode === "pdf-note-and-cli-markdown") {
+      return this.importPdfNoteAndCliMarkdown(note);
     }
     try {
       const file = this.vault.getAbstractFileByPath(existingPath);

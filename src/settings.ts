@@ -3,7 +3,7 @@ import { UpdateMode, FrontmatterField, MergeStrategy } from './api/types';
 /**
  * Import mode options
  */
-export type ImportMode = 'pdf-only' | 'markdown-with-pdf' | 'markdown-only';
+export type ImportMode = 'pdf-only' | 'markdown-with-pdf' | 'markdown-only' | 'pdf-note-and-cli-markdown';
 
 /**
  * PDF converter options

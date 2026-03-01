@@ -135,6 +135,14 @@ export function generatePdfFilename(note: SupernoteFile, template?: string): str
 }
 
 /**
+ * Generate a filename for the original .note backup using a template
+ */
+export function generateNoteFilename(note: SupernoteFile, template?: string): string {
+    const result = applyFilenameTemplate(note, template || '{date} {name}');
+    return `${result}.note`;
+}
+
+/**
  * Apply a filename template to a note
  */
 export function applyFilenameTemplate(note: SupernoteFile, template: string): string {

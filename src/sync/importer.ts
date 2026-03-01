@@ -3,7 +3,7 @@ import { SupernoteAPIClient } from '../api/client';
 import { PdfConverter } from '../api/converter';
 import { SupernoteFile, ExportOptions, UpdateOptions } from '../api/types';
 import { ImportMode, ConverterMode } from '../settings';
-import { generateMarkdown, generateFilename, generatePdfFilename, updateFrontmatter } from '../utils/markdown';
+import { generateMarkdown, generateFilename, generatePdfFilename, generateNoteFilename, updateFrontmatter } from '../utils/markdown';
 import { parseFrontmatter } from './matcher';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -55,6 +55,7 @@ export type ProgressCallback = (
 export interface ImportResult {
     success: boolean;
     note: SupernoteFile;
+    notePath?: string;
     markdownPath?: string;
     pdfPath?: string;
     error?: string;
@@ -351,6 +352,8 @@ export class NoteImporter {
         switch (this.importMode) {
             case 'pdf-only':
                 return this.importPdfOnly(note);
+            case 'pdf-note-and-cli-markdown':
+                return this.importPdfNoteAndCliMarkdown(note);
             case 'markdown-with-pdf':
                 return this.importMarkdownWithPdf(note);
             case 'markdown-only':
@@ -397,6 +400,67 @@ export class NoteImporter {
         }
 
         return normalizePath(`${normalizedBase}/${filename}`);
+    }
+
+    private getVaultBasePath(): string {
+        const adapter = this.vault.adapter as unknown as { getBasePath?: () => string };
+        if (adapter && typeof adapter.getBasePath === 'function') {
+            return adapter.getBasePath();
+        }
+        throw new Error('Desktop vault base path unavailable. This plugin is desktop-only for CLI conversion workflows.');
+    }
+
+    /**
+     * Import .note backup + CLI-generated PDF + CLI-generated markdown from recognized text.
+     */
+    private async importPdfNoteAndCliMarkdown(note: SupernoteFile): Promise<ImportResult> {
+        try {
+            const noteData = await this.client.downloadNoteFile(note.path);
+
+            const noteFilename = generateNoteFilename(note, this.filenameTemplate);
+            const noteVaultPath = this.buildVaultPath(this.notesFolder, note, noteFilename);
+
+            const folderPath = noteVaultPath.substring(0, noteVaultPath.lastIndexOf('/'));
+            if (folderPath) {
+                await this.ensureFolderExists(folderPath);
+            }
+
+            const existingNote = this.vault.getAbstractFileByPath(noteVaultPath);
+            if (existingNote instanceof TFile) {
+                await this.vault.modifyBinary(existingNote, noteData);
+            } else {
+                await this.vault.createBinary(noteVaultPath, noteData);
+            }
+
+            const basePath = this.getVaultBasePath();
+            const noteAbsolutePath = path.join(basePath, noteVaultPath);
+            const pdfVaultPath = noteVaultPath.replace(/\.note$/i, '.pdf');
+            const pdfAbsolutePath = path.join(basePath, pdfVaultPath);
+            const markdownVaultPath = pdfVaultPath.replace(/\.pdf$/i, '.md');
+
+            const conversionResult = await this.pdfConverter.convertFilePathWithCliPdfAndMarkdown(
+                noteAbsolutePath,
+                pdfAbsolutePath
+            );
+
+            if (!conversionResult.success) {
+                throw new Error(conversionResult.error || 'Unknown CLI conversion error');
+            }
+
+            return {
+                success: true,
+                note,
+                notePath: noteVaultPath,
+                pdfPath: pdfVaultPath,
+                markdownPath: markdownVaultPath,
+            };
+        } catch (error) {
+            return {
+                success: false,
+                note,
+                error: error instanceof Error ? error.message : String(error),
+            };
+        }
     }
 
     /**
@@ -588,9 +652,12 @@ export class NoteImporter {
      * Update a single note with selective update support
      */
     async updateSingleNote(note: SupernoteFile, existingPath: string): Promise<ImportResult> {
-        // For PDF-only mode, just re-import the PDF
+        // For PDF-centric modes, just re-import artifacts
         if (this.importMode === 'pdf-only') {
             return this.importPdfOnly(note);
+        }
+        if (this.importMode === 'pdf-note-and-cli-markdown') {
+            return this.importPdfNoteAndCliMarkdown(note);
         }
 
         try {

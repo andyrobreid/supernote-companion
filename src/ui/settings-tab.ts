@@ -135,10 +135,11 @@ export class SupernoteSettingTab extends PluginSettingTab {
             .setDesc('How to import notes from your Supernote')
             .addDropdown(dropdown => dropdown
                 .addOption('pdf-only', 'PDF only (recommended)')
+                .addOption('pdf-note-and-cli-markdown', 'PDF + .note backup + CLI markdown')
                 .addOption('markdown-with-pdf', 'Markdown + PDF attachment')
                 .addOption('markdown-only', 'Markdown only (no PDF)')
                 .setValue(this.plugin.settings.importMode)
-                .onChange(async (value: 'pdf-only' | 'markdown-with-pdf' | 'markdown-only') => {
+                .onChange(async (value: 'pdf-only' | 'pdf-note-and-cli-markdown' | 'markdown-with-pdf' | 'markdown-only') => {
                     this.plugin.settings.importMode = value;
                     await this.plugin.saveSettings();
                     this.display(); // Refresh to show/hide PDF folder setting
@@ -330,7 +331,7 @@ export class SupernoteSettingTab extends PluginSettingTab {
 
     private createExportSettings(containerEl: HTMLElement): void {
         // Only show export options for markdown modes
-        if (this.plugin.settings.importMode === 'pdf-only') {
+        if (this.plugin.settings.importMode === 'pdf-only' || this.plugin.settings.importMode === 'pdf-note-and-cli-markdown') {
             return;
         }
 
