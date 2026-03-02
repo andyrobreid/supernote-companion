@@ -30,6 +30,7 @@ export interface SupernoteCompanionSettings {
     // PDF Converter
     converterMode: ConverterMode;   // 'cli' for supernote_pdf binary, 'builtin' for TypeScript implementation
     converterPath: string;          // Path to supernote_pdf CLI binary (when using 'cli' mode)
+    normalizeCliMarkdownWhitespace: boolean; // Pass --normalize-text-whitespace for CLI markdown generation
     
     // Update Behavior
     updateModifiedFiles: 'skip' | 'overwrite' | 'ask';
@@ -66,6 +67,7 @@ export const DEFAULT_SETTINGS: SupernoteCompanionSettings = {
     // PDF Converter
     converterMode: 'cli',           // Default to CLI (more reliable)
     converterPath: '/home/dpshade/Developer/supernote_obsidian/supernote_pdf/target/release/supernote_pdf',
+    normalizeCliMarkdownWhitespace: true,
     
     // Update Behavior
     updateModifiedFiles: 'ask',

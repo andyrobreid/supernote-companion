@@ -423,6 +423,17 @@ export class SupernoteSettingTab extends PluginSettingTab {
                     })
                 );
 
+            new Setting(advancedContent)
+                .setName('Normalize CLI markdown text whitespace')
+                .setDesc('When using "PDF + .note backup + CLI markdown", pass --normalize-text-whitespace to supernote_pdf.')
+                .addToggle(toggle => toggle
+                    .setValue(this.plugin.settings.normalizeCliMarkdownWhitespace)
+                    .onChange(async (value) => {
+                        this.plugin.settings.normalizeCliMarkdownWhitespace = value;
+                        await this.plugin.saveSettings();
+                    })
+                );
+
             // Test CLI button
             new Setting(advancedContent)
                 .setName('Test converter')

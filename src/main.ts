@@ -94,7 +94,8 @@ export default class SupernoteCompanionPlugin extends Plugin {
             this.settings.preserveFolderStructure,
             exportOptions || this.getExportOptions(),
             this.settings.converterMode,
-            this.settings.converterPath
+            this.settings.converterPath,
+            this.settings.normalizeCliMarkdownWhitespace
         );
     }
 

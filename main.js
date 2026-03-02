@@ -61,6 +61,7 @@ var DEFAULT_SETTINGS = {
   converterMode: "cli",
   // Default to CLI (more reliable)
   converterPath: "/home/dpshade/Developer/supernote_obsidian/supernote_pdf/target/release/supernote_pdf",
+  normalizeCliMarkdownWhitespace: true,
   // Update Behavior
   updateModifiedFiles: "ask",
   updateMode: "all",
@@ -5190,7 +5191,7 @@ var PdfConverter = class {
    * Convert an existing .note file path using CLI and generate both .pdf and .md.
    * Expects outputPdfPath to end with .pdf; markdown will be generated next to it with .md extension.
    */
-  async convertFilePathWithCliPdfAndMarkdown(inputNotePath, outputPdfPath) {
+  async convertFilePathWithCliPdfAndMarkdown(inputNotePath, outputPdfPath, normalizeTextWhitespace = false) {
     var _a;
     const startTime = Date.now();
     if (this.mode !== "cli") {
@@ -5210,7 +5211,8 @@ var PdfConverter = class {
     }
     this.resolvedCliPath = cliPath;
     try {
-      const cmd = `"${cliPath}" --input "${inputNotePath}" --output "${outputPdfPath}" --pdf-and-markdown`;
+      const normalizeFlag = normalizeTextWhitespace ? " --normalize-text-whitespace" : "";
+      const cmd = `"${cliPath}" --input "${inputNotePath}" --output "${outputPdfPath}" --pdf-and-markdown${normalizeFlag}`;
       const { stdout, stderr } = await execAsync(cmd);
       if (stdout)
         console.debug(`[converter-cli] stdout: ${stdout}`);
@@ -5648,6 +5650,12 @@ Make sure Browse & Access is enabled on your Supernote.`);
       new import_obsidian2.Setting(advancedContent).setName("CLI binary path").setDesc("Path to the supernote_pdf binary (e.g., /usr/local/bin/supernote_pdf)").addText(
         (text) => text.setPlaceholder("Path to binary").setValue(this.plugin.settings.converterPath).onChange(async (value) => {
           this.plugin.settings.converterPath = value.trim();
+          await this.plugin.saveSettings();
+        })
+      );
+      new import_obsidian2.Setting(advancedContent).setName("Normalize CLI markdown text whitespace").setDesc('When using "PDF + .note backup + CLI markdown", pass --normalize-text-whitespace to supernote_pdf.').addToggle(
+        (toggle) => toggle.setValue(this.plugin.settings.normalizeCliMarkdownWhitespace).onChange(async (value) => {
+          this.plugin.settings.normalizeCliMarkdownWhitespace = value;
           await this.plugin.saveSettings();
         })
       );
@@ -7015,7 +7023,7 @@ async function parallelLimit(items, limit, fn) {
   return results;
 }
 var NoteImporter = class {
-  constructor(vault, client, notesFolder, pdfFolder, importMode, filenameTemplate, preserveFolderStructure, exportOptions, converterMode = "cli", converterPath = "") {
+  constructor(vault, client, notesFolder, pdfFolder, importMode, filenameTemplate, preserveFolderStructure, exportOptions, converterMode = "cli", converterPath = "", normalizeCliMarkdownWhitespace = false) {
     this.vault = vault;
     this.client = client;
     this.pdfConverter = new PdfConverter(converterMode, converterPath);
@@ -7025,6 +7033,7 @@ var NoteImporter = class {
     this.filenameTemplate = filenameTemplate;
     this.preserveFolderStructure = preserveFolderStructure;
     this.exportOptions = exportOptions;
+    this.normalizeCliMarkdownWhitespace = normalizeCliMarkdownWhitespace;
   }
   /**
    * Check if the PDF conversion is available (always true with built-in converter)
@@ -7267,7 +7276,8 @@ var NoteImporter = class {
       const markdownVaultPath = pdfVaultPath.replace(/\.pdf$/i, ".md");
       const conversionResult = await this.pdfConverter.convertFilePathWithCliPdfAndMarkdown(
         noteAbsolutePath,
-        pdfAbsolutePath
+        pdfAbsolutePath,
+        this.normalizeCliMarkdownWhitespace
       );
       if (!conversionResult.success) {
         throw new Error(conversionResult.error || "Unknown CLI conversion error");
@@ -7642,7 +7652,8 @@ var SupernoteCompanionPlugin = class extends import_obsidian10.Plugin {
       this.settings.preserveFolderStructure,
       exportOptions || this.getExportOptions(),
       this.settings.converterMode,
-      this.settings.converterPath
+      this.settings.converterPath,
+      this.settings.normalizeCliMarkdownWhitespace
     );
   }
   /**

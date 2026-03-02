@@ -327,7 +327,11 @@ export class PdfConverter {
      * Convert an existing .note file path using CLI and generate both .pdf and .md.
      * Expects outputPdfPath to end with .pdf; markdown will be generated next to it with .md extension.
      */
-    async convertFilePathWithCliPdfAndMarkdown(inputNotePath: string, outputPdfPath: string): Promise<ConversionResult> {
+    async convertFilePathWithCliPdfAndMarkdown(
+        inputNotePath: string,
+        outputPdfPath: string,
+        normalizeTextWhitespace: boolean = false
+    ): Promise<ConversionResult> {
         const startTime = Date.now();
 
         if (this.mode !== 'cli') {
@@ -350,7 +354,8 @@ export class PdfConverter {
         this.resolvedCliPath = cliPath;
 
         try {
-            const cmd = `"${cliPath}" --input "${inputNotePath}" --output "${outputPdfPath}" --pdf-and-markdown`;
+            const normalizeFlag = normalizeTextWhitespace ? ' --normalize-text-whitespace' : '';
+            const cmd = `"${cliPath}" --input "${inputNotePath}" --output "${outputPdfPath}" --pdf-and-markdown${normalizeFlag}`;
             const { stdout, stderr } = await execAsync(cmd);
             if (stdout) console.debug(`[converter-cli] stdout: ${stdout}`);
             if (stderr) console.debug(`[converter-cli] stderr: ${stderr}`);

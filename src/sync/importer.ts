@@ -80,6 +80,7 @@ export class NoteImporter {
     private preserveFolderStructure: boolean;
     private exportOptions: ExportOptions;
     private updateOptions?: UpdateOptions;
+    private normalizeCliMarkdownWhitespace: boolean;
 
     constructor(
         vault: Vault,
@@ -91,7 +92,8 @@ export class NoteImporter {
         preserveFolderStructure: boolean,
         exportOptions: ExportOptions,
         converterMode: ConverterMode = 'cli',
-        converterPath: string = ''
+        converterPath: string = '',
+        normalizeCliMarkdownWhitespace: boolean = false
     ) {
         this.vault = vault;
         this.client = client;
@@ -102,6 +104,7 @@ export class NoteImporter {
         this.filenameTemplate = filenameTemplate;
         this.preserveFolderStructure = preserveFolderStructure;
         this.exportOptions = exportOptions;
+        this.normalizeCliMarkdownWhitespace = normalizeCliMarkdownWhitespace;
     }
 
     /**
@@ -440,7 +443,8 @@ export class NoteImporter {
 
             const conversionResult = await this.pdfConverter.convertFilePathWithCliPdfAndMarkdown(
                 noteAbsolutePath,
-                pdfAbsolutePath
+                pdfAbsolutePath,
+                this.normalizeCliMarkdownWhitespace
             );
 
             if (!conversionResult.success) {
