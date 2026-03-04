@@ -3,7 +3,7 @@ import { SupernoteAPIClient } from '../api/client';
 import { PdfConverter } from '../api/converter';
 import { SupernoteFile, ExportOptions, UpdateOptions } from '../api/types';
 import { ImportMode, ConverterMode } from '../settings';
-import { generateMarkdown, generateFilename, generatePdfFilename, generateNoteFilename, updateFrontmatter } from '../utils/markdown';
+import { generateMarkdown, generateFilename, generatePdfFilename, updateFrontmatter } from '../utils/markdown';
 import { parseFrontmatter } from './matcher';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -414,35 +414,33 @@ export class NoteImporter {
     }
 
     /**
-     * Import .note backup + CLI-generated PDF + CLI-generated markdown from recognized text.
+     * Import CLI-generated PDF + CLI-generated markdown from recognized text.
+     * Does NOT keep a .note backup in the vault.
      */
     private async importPdfNoteAndCliMarkdown(note: SupernoteFile): Promise<ImportResult> {
+        let tempDir: string | null = null;
+
         try {
             const noteData = await this.client.downloadNoteFile(note.path);
 
-            const noteFilename = generateNoteFilename(note, this.filenameTemplate);
-            const noteVaultPath = this.buildVaultPath(this.notesFolder, note, noteFilename);
+            const pdfFilename = generatePdfFilename(note, this.filenameTemplate);
+            const pdfVaultPath = this.buildVaultPath(this.notesFolder, note, pdfFilename);
+            const markdownVaultPath = pdfVaultPath.replace(/\.pdf$/i, '.md');
 
-            const folderPath = noteVaultPath.substring(0, noteVaultPath.lastIndexOf('/'));
+            const folderPath = pdfVaultPath.substring(0, pdfVaultPath.lastIndexOf('/'));
             if (folderPath) {
                 await this.ensureFolderExists(folderPath);
             }
 
-            const existingNote = this.vault.getAbstractFileByPath(noteVaultPath);
-            if (existingNote instanceof TFile) {
-                await this.vault.modifyBinary(existingNote, noteData);
-            } else {
-                await this.vault.createBinary(noteVaultPath, noteData);
-            }
+            tempDir = await this.pdfConverter.createTempDir('sn-cli-single-');
+            const tempNotePath = path.join(tempDir, `${note.id}.note`);
+            await fs.promises.writeFile(tempNotePath, Buffer.from(noteData));
 
             const basePath = this.getVaultBasePath();
-            const noteAbsolutePath = path.join(basePath, noteVaultPath);
-            const pdfVaultPath = noteVaultPath.replace(/\.note$/i, '.pdf');
             const pdfAbsolutePath = path.join(basePath, pdfVaultPath);
-            const markdownVaultPath = pdfVaultPath.replace(/\.pdf$/i, '.md');
 
             const conversionResult = await this.pdfConverter.convertFilePathWithCliPdfAndMarkdown(
-                noteAbsolutePath,
+                tempNotePath,
                 pdfAbsolutePath,
                 this.normalizeCliMarkdownWhitespace
             );
@@ -454,7 +452,6 @@ export class NoteImporter {
             return {
                 success: true,
                 note,
-                notePath: noteVaultPath,
                 pdfPath: pdfVaultPath,
                 markdownPath: markdownVaultPath,
             };
@@ -464,6 +461,10 @@ export class NoteImporter {
                 note,
                 error: error instanceof Error ? error.message : String(error),
             };
+        } finally {
+            if (tempDir) {
+                await this.pdfConverter.cleanupTempDir(tempDir);
+            }
         }
     }
 

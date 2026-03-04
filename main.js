@@ -5497,7 +5497,7 @@ Make sure Browse & Access is enabled on your Supernote.`);
   createSyncSettings(containerEl) {
     new import_obsidian2.Setting(containerEl).setHeading().setName("Sync configuration");
     new import_obsidian2.Setting(containerEl).setName("Import mode").setDesc("How to import notes from your Supernote").addDropdown(
-      (dropdown) => dropdown.addOption("pdf-only", "PDF only (recommended)").addOption("pdf-note-and-cli-markdown", "PDF + .note backup + CLI markdown").addOption("markdown-with-pdf", "Markdown + PDF attachment").addOption("markdown-only", "Markdown only (no PDF)").setValue(this.plugin.settings.importMode).onChange(async (value) => {
+      (dropdown) => dropdown.addOption("pdf-only", "PDF only (recommended)").addOption("pdf-note-and-cli-markdown", "PDF + CLI markdown (no .note backup)").addOption("markdown-with-pdf", "Markdown + PDF attachment").addOption("markdown-only", "Markdown only (no PDF)").setValue(this.plugin.settings.importMode).onChange(async (value) => {
         this.plugin.settings.importMode = value;
         await this.plugin.saveSettings();
         this.display();
@@ -5653,7 +5653,7 @@ Make sure Browse & Access is enabled on your Supernote.`);
           await this.plugin.saveSettings();
         })
       );
-      new import_obsidian2.Setting(advancedContent).setName("Normalize CLI markdown text whitespace").setDesc('When using "PDF + .note backup + CLI markdown", pass --normalize-text-whitespace to supernote_pdf.').addToggle(
+      new import_obsidian2.Setting(advancedContent).setName("Normalize CLI markdown text whitespace").setDesc('When using "PDF + CLI markdown (no .note backup)", pass --normalize-text-whitespace to supernote_pdf.').addToggle(
         (toggle) => toggle.setValue(this.plugin.settings.normalizeCliMarkdownWhitespace).onChange(async (value) => {
           this.plugin.settings.normalizeCliMarkdownWhitespace = value;
           await this.plugin.saveSettings();
@@ -5809,10 +5809,6 @@ function generateFilename(note, template) {
 function generatePdfFilename(note, template) {
   const result = applyFilenameTemplate(note, template || "{date} {name}");
   return `${result}.pdf`;
-}
-function generateNoteFilename(note, template) {
-  const result = applyFilenameTemplate(note, template || "{date} {name}");
-  return `${result}.note`;
 }
 function applyFilenameTemplate(note, template) {
   var _a;
@@ -7252,30 +7248,27 @@ var NoteImporter = class {
     throw new Error("Desktop vault base path unavailable. This plugin is desktop-only for CLI conversion workflows.");
   }
   /**
-   * Import .note backup + CLI-generated PDF + CLI-generated markdown from recognized text.
+   * Import CLI-generated PDF + CLI-generated markdown from recognized text.
+   * Does NOT keep a .note backup in the vault.
    */
   async importPdfNoteAndCliMarkdown(note) {
+    let tempDir = null;
     try {
       const noteData = await this.client.downloadNoteFile(note.path);
-      const noteFilename = generateNoteFilename(note, this.filenameTemplate);
-      const noteVaultPath = this.buildVaultPath(this.notesFolder, note, noteFilename);
-      const folderPath = noteVaultPath.substring(0, noteVaultPath.lastIndexOf("/"));
+      const pdfFilename = generatePdfFilename(note, this.filenameTemplate);
+      const pdfVaultPath = this.buildVaultPath(this.notesFolder, note, pdfFilename);
+      const markdownVaultPath = pdfVaultPath.replace(/\.pdf$/i, ".md");
+      const folderPath = pdfVaultPath.substring(0, pdfVaultPath.lastIndexOf("/"));
       if (folderPath) {
         await this.ensureFolderExists(folderPath);
       }
-      const existingNote = this.vault.getAbstractFileByPath(noteVaultPath);
-      if (existingNote instanceof import_obsidian9.TFile) {
-        await this.vault.modifyBinary(existingNote, noteData);
-      } else {
-        await this.vault.createBinary(noteVaultPath, noteData);
-      }
+      tempDir = await this.pdfConverter.createTempDir("sn-cli-single-");
+      const tempNotePath = path2.join(tempDir, `${note.id}.note`);
+      await fs2.promises.writeFile(tempNotePath, Buffer.from(noteData));
       const basePath = this.getVaultBasePath();
-      const noteAbsolutePath = path2.join(basePath, noteVaultPath);
-      const pdfVaultPath = noteVaultPath.replace(/\.note$/i, ".pdf");
       const pdfAbsolutePath = path2.join(basePath, pdfVaultPath);
-      const markdownVaultPath = pdfVaultPath.replace(/\.pdf$/i, ".md");
       const conversionResult = await this.pdfConverter.convertFilePathWithCliPdfAndMarkdown(
-        noteAbsolutePath,
+        tempNotePath,
         pdfAbsolutePath,
         this.normalizeCliMarkdownWhitespace
       );
@@ -7285,7 +7278,6 @@ var NoteImporter = class {
       return {
         success: true,
         note,
-        notePath: noteVaultPath,
         pdfPath: pdfVaultPath,
         markdownPath: markdownVaultPath
       };
@@ -7295,6 +7287,10 @@ var NoteImporter = class {
         note,
         error: error instanceof Error ? error.message : String(error)
       };
+    } finally {
+      if (tempDir) {
+        await this.pdfConverter.cleanupTempDir(tempDir);
+      }
     }
   }
   /**

@@ -135,7 +135,7 @@ export class SupernoteSettingTab extends PluginSettingTab {
             .setDesc('How to import notes from your Supernote')
             .addDropdown(dropdown => dropdown
                 .addOption('pdf-only', 'PDF only (recommended)')
-                .addOption('pdf-note-and-cli-markdown', 'PDF + .note backup + CLI markdown')
+                .addOption('pdf-note-and-cli-markdown', 'PDF + CLI markdown (no .note backup)')
                 .addOption('markdown-with-pdf', 'Markdown + PDF attachment')
                 .addOption('markdown-only', 'Markdown only (no PDF)')
                 .setValue(this.plugin.settings.importMode)
@@ -425,7 +425,7 @@ export class SupernoteSettingTab extends PluginSettingTab {
 
             new Setting(advancedContent)
                 .setName('Normalize CLI markdown text whitespace')
-                .setDesc('When using "PDF + .note backup + CLI markdown", pass --normalize-text-whitespace to supernote_pdf.')
+                .setDesc('When using "PDF + CLI markdown (no .note backup)", pass --normalize-text-whitespace to supernote_pdf.')
                 .addToggle(toggle => toggle
                     .setValue(this.plugin.settings.normalizeCliMarkdownWhitespace)
                     .onChange(async (value) => {
