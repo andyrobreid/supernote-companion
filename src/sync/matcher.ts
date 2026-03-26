@@ -8,6 +8,16 @@ import { LocalNoteFile } from '../api/types';
  * 1. Markdown files with frontmatter containing 'supernote_id'
  * 2. PDF files that were imported directly (matched by filename)
  */
+function generateStableIdFromUri(uri: string): string {
+    let hash = 0;
+    for (let i = 0; i < uri.length; i++) {
+        const char = uri.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash;
+    }
+    return `sn-${Math.abs(hash).toString(16)}`;
+}
+
 export async function scanLocalNotes(
     vault: Vault,
     folderPath: string
@@ -30,14 +40,32 @@ export async function scanLocalNotes(
             // Check if this file has a Supernote source
             if (frontmatter.source && frontmatter.supernote_id) {
                 const id = String(frontmatter.supernote_id);
-                
-                localNotes.set(id, {
+                const sourcePath = String(frontmatter.source);
+
+                const local: LocalNoteFile = {
                     path: file.path,
-                    id: id,
-                    sourcePath: String(frontmatter.source),
+                    id,
+                    sourcePath,
                     mtime: file.stat.mtime,
                     pdfPath: frontmatter.pdf_attachment ? String(frontmatter.pdf_attachment) : undefined,
-                });
+                };
+
+                // Primary key: explicit supernote_id in frontmatter
+                localNotes.set(id, local);
+
+                // Alias key: derive ID from source path (helps if supernote_id is stale/wrong)
+                if (sourcePath.startsWith('/Note/') && sourcePath.endsWith('.note')) {
+                    const derivedId = generateStableIdFromUri(sourcePath);
+                    if (!localNotes.has(derivedId)) {
+                        localNotes.set(derivedId, local);
+                    }
+
+                    // Legacy CLI output fallback: source like /Note/sn-<hex>.note
+                    const basename = sourcePath.split('/').pop()?.replace(/\.note$/i, '') || '';
+                    if (/^sn-[0-9a-f]+$/i.test(basename) && !localNotes.has(basename)) {
+                        localNotes.set(basename, local);
+                    }
+                }
             }
         } catch (error) {
             console.error(`Failed to process markdown file ${file.path}:`, error);

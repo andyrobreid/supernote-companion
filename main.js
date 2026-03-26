@@ -6812,7 +6812,17 @@ var TrashManagementModal = class extends import_obsidian7.Modal {
 
 // src/sync/matcher.ts
 var import_obsidian8 = require("obsidian");
+function generateStableIdFromUri(uri) {
+  let hash = 0;
+  for (let i = 0; i < uri.length; i++) {
+    const char = uri.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash = hash & hash;
+  }
+  return `sn-${Math.abs(hash).toString(16)}`;
+}
 async function scanLocalNotes(vault, folderPath) {
+  var _a;
   const localNotes = /* @__PURE__ */ new Map();
   const normalizedFolder = folderPath.startsWith("/") ? folderPath.slice(1) : folderPath;
   const mdFiles = vault.getMarkdownFiles().filter(
@@ -6824,13 +6834,25 @@ async function scanLocalNotes(vault, folderPath) {
       const frontmatter = parseFrontmatter(content);
       if (frontmatter.source && frontmatter.supernote_id) {
         const id = String(frontmatter.supernote_id);
-        localNotes.set(id, {
+        const sourcePath = String(frontmatter.source);
+        const local = {
           path: file.path,
           id,
-          sourcePath: String(frontmatter.source),
+          sourcePath,
           mtime: file.stat.mtime,
           pdfPath: frontmatter.pdf_attachment ? String(frontmatter.pdf_attachment) : void 0
-        });
+        };
+        localNotes.set(id, local);
+        if (sourcePath.startsWith("/Note/") && sourcePath.endsWith(".note")) {
+          const derivedId = generateStableIdFromUri(sourcePath);
+          if (!localNotes.has(derivedId)) {
+            localNotes.set(derivedId, local);
+          }
+          const basename = ((_a = sourcePath.split("/").pop()) == null ? void 0 : _a.replace(/\.note$/i, "")) || "";
+          if (/^sn-[0-9a-f]+$/i.test(basename) && !localNotes.has(basename)) {
+            localNotes.set(basename, local);
+          }
+        }
       }
     } catch (error) {
       console.error(`Failed to process markdown file ${file.path}:`, error);
@@ -7293,6 +7315,30 @@ var NoteImporter = class {
     }
     throw new Error("Desktop vault base path unavailable. This plugin is desktop-only for CLI conversion workflows.");
   }
+  async normalizeCliMarkdownFrontmatter(markdownAbsolutePath, note, includePdfAttachment, pdfFilename) {
+    const raw = await fs2.promises.readFile(markdownAbsolutePath, "utf8");
+    const setOrInsertLine = (content2, key, value) => {
+      const re = new RegExp(`^${key}:\\s.*$`, "m");
+      const line = `${key}: ${value}`;
+      if (re.test(content2)) {
+        return content2.replace(re, line);
+      }
+      return content2.replace(/^---\n/, `---
+${line}
+`);
+    };
+    let content = raw;
+    content = setOrInsertLine(content, "name", note.name);
+    content = setOrInsertLine(content, "supernote_id", note.id);
+    content = setOrInsertLine(content, "source", note.path);
+    if (includePdfAttachment && pdfFilename) {
+      content = setOrInsertLine(content, "pdf_attachment", pdfFilename);
+    } else {
+      content = content.replace(/^pdf_attachment:\s.*\n/gm, "");
+      content = content.replace(/\n## PDF Attachment\n[\s\S]*?(?=\n##\s|\n#\s|$)/g, "\n").replace(/!\[\[[^\]]+\.pdf\]\]\n?/gi, "").replace(/\n{3,}/g, "\n\n");
+    }
+    await fs2.promises.writeFile(markdownAbsolutePath, content, "utf8");
+  }
   /**
    * Import CLI-generated PDF + CLI-generated markdown from recognized text.
    * Does NOT keep a .note backup in the vault.
@@ -7313,6 +7359,7 @@ var NoteImporter = class {
       await fs2.promises.writeFile(tempNotePath, Buffer.from(noteData));
       const basePath = this.getVaultBasePath();
       const pdfAbsolutePath = path2.join(basePath, pdfVaultPath);
+      const markdownAbsolutePath = path2.join(basePath, markdownVaultPath);
       const conversionResult = await this.pdfConverter.convertFilePathWithCliPdfAndMarkdown(
         tempNotePath,
         pdfAbsolutePath,
@@ -7321,6 +7368,7 @@ var NoteImporter = class {
       if (!conversionResult.success) {
         throw new Error(conversionResult.error || "Unknown CLI conversion error");
       }
+      await this.normalizeCliMarkdownFrontmatter(markdownAbsolutePath, note, true, pdfFilename);
       return {
         success: true,
         note,
@@ -7445,10 +7493,7 @@ var NoteImporter = class {
         this.normalizeCliMarkdownWhitespace
       );
       if (cliResult.success) {
-        const cliMarkdown = await fs2.promises.readFile(markdownAbsolutePath, "utf8");
-        const withoutPdfFrontmatter = cliMarkdown.replace(/^pdf_attachment:\s.*\n/gm, "");
-        const withoutPdfSection = withoutPdfFrontmatter.replace(/\n## PDF Attachment\n[\s\S]*?(?=\n##\s|\n#\s|$)/g, "\n").replace(/!\[\[[^\]]+\.pdf\]\]\n?/gi, "").replace(/\n{3,}/g, "\n\n");
-        await fs2.promises.writeFile(markdownAbsolutePath, withoutPdfSection, "utf8");
+        await this.normalizeCliMarkdownFrontmatter(markdownAbsolutePath, note, false);
         return {
           success: true,
           note,

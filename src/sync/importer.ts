@@ -413,6 +413,41 @@ export class NoteImporter {
         throw new Error('Desktop vault base path unavailable. This plugin is desktop-only for CLI conversion workflows.');
     }
 
+    private async normalizeCliMarkdownFrontmatter(
+        markdownAbsolutePath: string,
+        note: SupernoteFile,
+        includePdfAttachment: boolean,
+        pdfFilename?: string
+    ): Promise<void> {
+        const raw = await fs.promises.readFile(markdownAbsolutePath, 'utf8');
+
+        const setOrInsertLine = (content: string, key: string, value: string): string => {
+            const re = new RegExp(`^${key}:\\s.*$`, 'm');
+            const line = `${key}: ${value}`;
+            if (re.test(content)) {
+                return content.replace(re, line);
+            }
+            return content.replace(/^---\n/, `---\n${line}\n`);
+        };
+
+        let content = raw;
+        content = setOrInsertLine(content, 'name', note.name);
+        content = setOrInsertLine(content, 'supernote_id', note.id);
+        content = setOrInsertLine(content, 'source', note.path);
+
+        if (includePdfAttachment && pdfFilename) {
+            content = setOrInsertLine(content, 'pdf_attachment', pdfFilename);
+        } else {
+            content = content.replace(/^pdf_attachment:\s.*\n/gm, '');
+            content = content
+                .replace(/\n## PDF Attachment\n[\s\S]*?(?=\n##\s|\n#\s|$)/g, '\n')
+                .replace(/!\[\[[^\]]+\.pdf\]\]\n?/gi, '')
+                .replace(/\n{3,}/g, '\n\n');
+        }
+
+        await fs.promises.writeFile(markdownAbsolutePath, content, 'utf8');
+    }
+
     /**
      * Import CLI-generated PDF + CLI-generated markdown from recognized text.
      * Does NOT keep a .note backup in the vault.
@@ -438,6 +473,7 @@ export class NoteImporter {
 
             const basePath = this.getVaultBasePath();
             const pdfAbsolutePath = path.join(basePath, pdfVaultPath);
+            const markdownAbsolutePath = path.join(basePath, markdownVaultPath);
 
             const conversionResult = await this.pdfConverter.convertFilePathWithCliPdfAndMarkdown(
                 tempNotePath,
@@ -448,6 +484,8 @@ export class NoteImporter {
             if (!conversionResult.success) {
                 throw new Error(conversionResult.error || 'Unknown CLI conversion error');
             }
+
+            await this.normalizeCliMarkdownFrontmatter(markdownAbsolutePath, note, true, pdfFilename);
 
             return {
                 success: true,
@@ -605,15 +643,7 @@ export class NoteImporter {
             );
 
             if (cliResult.success) {
-                // Safety normalization: markdown-only output must not reference PDFs.
-                // This guards against older/newer CLI template variations.
-                const cliMarkdown = await fs.promises.readFile(markdownAbsolutePath, 'utf8');
-                const withoutPdfFrontmatter = cliMarkdown.replace(/^pdf_attachment:\s.*\n/gm, '');
-                const withoutPdfSection = withoutPdfFrontmatter
-                    .replace(/\n## PDF Attachment\n[\s\S]*?(?=\n##\s|\n#\s|$)/g, '\n')
-                    .replace(/!\[\[[^\]]+\.pdf\]\]\n?/gi, '')
-                    .replace(/\n{3,}/g, '\n\n');
-                await fs.promises.writeFile(markdownAbsolutePath, withoutPdfSection, 'utf8');
+                await this.normalizeCliMarkdownFrontmatter(markdownAbsolutePath, note, false);
 
                 return {
                     success: true,
