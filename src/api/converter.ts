@@ -382,6 +382,60 @@ export class PdfConverter {
     }
 
     /**
+     * Convert an existing .note file path using CLI and generate markdown only.
+     * Expects outputMarkdownPath to end with .md.
+     */
+    async convertFilePathWithCliMarkdownOnly(
+        inputNotePath: string,
+        outputMarkdownPath: string,
+        normalizeTextWhitespace: boolean = false
+    ): Promise<ConversionResult> {
+        const startTime = Date.now();
+
+        if (this.mode !== 'cli') {
+            return {
+                success: false,
+                error: 'Markdown-only CLI conversion requires converter mode "cli"',
+                conversionTimeMs: Date.now() - startTime,
+            };
+        }
+
+        const cliPath = this.resolvedCliPath ?? findCliTool(this.cliPath);
+        if (!cliPath) {
+            return {
+                success: false,
+                error: 'supernote_pdf CLI not found. Install it with: cargo install supernote_pdf',
+                conversionTimeMs: Date.now() - startTime,
+            };
+        }
+
+        this.resolvedCliPath = cliPath;
+
+        try {
+            const normalizeFlag = normalizeTextWhitespace ? ' --normalize-text-whitespace' : '';
+            const cmd = `"${cliPath}" --input "${inputNotePath}" --output "${outputMarkdownPath}" --markdown-only${normalizeFlag}`;
+            const { stdout, stderr } = await execAsync(cmd);
+            if (stdout) console.debug(`[converter-cli] stdout: ${stdout}`);
+            if (stderr) console.debug(`[converter-cli] stderr: ${stderr}`);
+
+            if (!fs.existsSync(outputMarkdownPath)) {
+                throw new Error(`Expected markdown output missing at ${outputMarkdownPath}`);
+            }
+
+            return {
+                success: true,
+                conversionTimeMs: Date.now() - startTime,
+            };
+        } catch (error) {
+            return {
+                success: false,
+                error: `CLI conversion failed: ${error instanceof Error ? error.message : String(error)}`,
+                conversionTimeMs: Date.now() - startTime,
+            };
+        }
+    }
+
+    /**
      * Convert using the built-in TypeScript implementation
      */
     private async convertWithBuiltin(noteData: ArrayBuffer, noteId?: string): Promise<ConversionResult> {

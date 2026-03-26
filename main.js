@@ -5238,6 +5238,52 @@ var PdfConverter = class {
     }
   }
   /**
+   * Convert an existing .note file path using CLI and generate markdown only.
+   * Expects outputMarkdownPath to end with .md.
+   */
+  async convertFilePathWithCliMarkdownOnly(inputNotePath, outputMarkdownPath, normalizeTextWhitespace = false) {
+    var _a;
+    const startTime = Date.now();
+    if (this.mode !== "cli") {
+      return {
+        success: false,
+        error: 'Markdown-only CLI conversion requires converter mode "cli"',
+        conversionTimeMs: Date.now() - startTime
+      };
+    }
+    const cliPath = (_a = this.resolvedCliPath) != null ? _a : findCliTool(this.cliPath);
+    if (!cliPath) {
+      return {
+        success: false,
+        error: "supernote_pdf CLI not found. Install it with: cargo install supernote_pdf",
+        conversionTimeMs: Date.now() - startTime
+      };
+    }
+    this.resolvedCliPath = cliPath;
+    try {
+      const normalizeFlag = normalizeTextWhitespace ? " --normalize-text-whitespace" : "";
+      const cmd = `"${cliPath}" --input "${inputNotePath}" --output "${outputMarkdownPath}" --markdown-only${normalizeFlag}`;
+      const { stdout, stderr } = await execAsync(cmd);
+      if (stdout)
+        console.debug(`[converter-cli] stdout: ${stdout}`);
+      if (stderr)
+        console.debug(`[converter-cli] stderr: ${stderr}`);
+      if (!fs.existsSync(outputMarkdownPath)) {
+        throw new Error(`Expected markdown output missing at ${outputMarkdownPath}`);
+      }
+      return {
+        success: true,
+        conversionTimeMs: Date.now() - startTime
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: `CLI conversion failed: ${error instanceof Error ? error.message : String(error)}`,
+        conversionTimeMs: Date.now() - startTime
+      };
+    }
+  }
+  /**
    * Convert using the built-in TypeScript implementation
    */
   async convertWithBuiltin(noteData, noteId) {
@@ -7372,23 +7418,46 @@ var NoteImporter = class {
     }
   }
   /**
-   * Import just the markdown file without PDF
+   * Import just the markdown file without PDF.
+   *
+   * Preferred path (CLI mode): use supernote_pdf --markdown-only for OCR-aware markdown.
+   * Fallback path: plugin's built-in markdown generator.
    */
   async importMarkdownOnly(note) {
     var _a;
+    let tempDir = null;
     try {
-      let thumbnailBase64;
-      if (this.exportOptions.includeThumbnail) {
-        thumbnailBase64 = (_a = this.client.getThumbnail(note.id)) != null ? _a : void 0;
-      }
-      const optionsWithoutPdf = { ...this.exportOptions, attachPdf: false };
-      const content = generateMarkdown(note, optionsWithoutPdf, void 0, thumbnailBase64);
       const filename = generateFilename(note, this.filenameTemplate);
       const filepath = this.buildVaultPath(this.notesFolder, note, filename);
       const folderPath = filepath.substring(0, filepath.lastIndexOf("/"));
       if (folderPath) {
         await this.ensureFolderExists(folderPath);
       }
+      const noteData = await this.client.downloadNoteFile(note.path);
+      tempDir = await this.pdfConverter.createTempDir("sn-cli-md-only-");
+      const tempNotePath = path2.join(tempDir, `${note.id}.note`);
+      await fs2.promises.writeFile(tempNotePath, Buffer.from(noteData));
+      const basePath = this.getVaultBasePath();
+      const markdownAbsolutePath = path2.join(basePath, filepath);
+      const cliResult = await this.pdfConverter.convertFilePathWithCliMarkdownOnly(
+        tempNotePath,
+        markdownAbsolutePath,
+        this.normalizeCliMarkdownWhitespace
+      );
+      if (cliResult.success) {
+        return {
+          success: true,
+          note,
+          markdownPath: filepath
+        };
+      }
+      console.warn(`[importer] CLI markdown-only conversion failed for ${note.name}; falling back to built-in markdown. Error: ${cliResult.error}`);
+      let thumbnailBase64;
+      if (this.exportOptions.includeThumbnail) {
+        thumbnailBase64 = (_a = this.client.getThumbnail(note.id)) != null ? _a : void 0;
+      }
+      const optionsWithoutPdf = { ...this.exportOptions, attachPdf: false };
+      const content = generateMarkdown(note, optionsWithoutPdf, void 0, thumbnailBase64);
       const existingFile = this.vault.getAbstractFileByPath(filepath);
       if (existingFile instanceof import_obsidian9.TFile) {
         await this.vault.modify(existingFile, content);
@@ -7406,6 +7475,10 @@ var NoteImporter = class {
         note,
         error: error instanceof Error ? error.message : String(error)
       };
+    } finally {
+      if (tempDir) {
+        await this.pdfConverter.cleanupTempDir(tempDir);
+      }
     }
   }
   /**
