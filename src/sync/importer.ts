@@ -605,6 +605,16 @@ export class NoteImporter {
             );
 
             if (cliResult.success) {
+                // Safety normalization: markdown-only output must not reference PDFs.
+                // This guards against older/newer CLI template variations.
+                const cliMarkdown = await fs.promises.readFile(markdownAbsolutePath, 'utf8');
+                const withoutPdfFrontmatter = cliMarkdown.replace(/^pdf_attachment:\s.*\n/gm, '');
+                const withoutPdfSection = withoutPdfFrontmatter
+                    .replace(/\n## PDF Attachment\n[\s\S]*?(?=\n##\s|\n#\s|$)/g, '\n')
+                    .replace(/!\[\[[^\]]+\.pdf\]\]\n?/gi, '')
+                    .replace(/\n{3,}/g, '\n\n');
+                await fs.promises.writeFile(markdownAbsolutePath, withoutPdfSection, 'utf8');
+
                 return {
                     success: true,
                     note,
