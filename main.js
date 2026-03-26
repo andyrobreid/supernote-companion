@@ -5212,7 +5212,8 @@ var PdfConverter = class {
     this.resolvedCliPath = cliPath;
     try {
       const normalizeFlag = normalizeTextWhitespace ? " --normalize-text-whitespace" : "";
-      const cmd = `"${cliPath}" --input "${inputNotePath}" --output "${outputPdfPath}" --pdf-and-markdown${normalizeFlag}`;
+      const smartBreaksFlag = " --smart-markdown-breaks";
+      const cmd = `"${cliPath}" --input "${inputNotePath}" --output "${outputPdfPath}" --pdf-and-markdown${normalizeFlag}${smartBreaksFlag}`;
       const { stdout, stderr } = await execAsync(cmd);
       if (stdout)
         console.debug(`[converter-cli] stdout: ${stdout}`);
@@ -5262,7 +5263,8 @@ var PdfConverter = class {
     this.resolvedCliPath = cliPath;
     try {
       const normalizeFlag = normalizeTextWhitespace ? " --normalize-text-whitespace" : "";
-      const cmd = `"${cliPath}" --input "${inputNotePath}" --output "${outputMarkdownPath}" --markdown-only${normalizeFlag}`;
+      const smartBreaksFlag = " --smart-markdown-breaks";
+      const cmd = `"${cliPath}" --input "${inputNotePath}" --output "${outputMarkdownPath}" --markdown-only${normalizeFlag}${smartBreaksFlag}`;
       const { stdout, stderr } = await execAsync(cmd);
       if (stdout)
         console.debug(`[converter-cli] stdout: ${stdout}`);
