@@ -14,16 +14,22 @@ import * as path from 'path';
 import * as os from 'os';
 
 /**
- * Common locations to search for supernote_pdf binary
+ * Common locations to search for converter binaries.
+ * supernote_sync is the new preferred name; supernote_pdf remains supported.
  */
 const CLI_SEARCH_PATHS = [
     // User's home directory
+    path.join(os.homedir(), '.local', 'bin', 'supernote_sync'),
     path.join(os.homedir(), '.local', 'bin', 'supernote_pdf'),
+    path.join(os.homedir(), 'bin', 'supernote_sync'),
     path.join(os.homedir(), 'bin', 'supernote_pdf'),
     // System paths
+    '/usr/local/bin/supernote_sync',
     '/usr/local/bin/supernote_pdf',
+    '/usr/bin/supernote_sync',
     '/usr/bin/supernote_pdf',
     // Cargo install location
+    path.join(os.homedir(), '.cargo', 'bin', 'supernote_sync'),
     path.join(os.homedir(), '.cargo', 'bin', 'supernote_pdf'),
 ];
 
@@ -88,12 +94,16 @@ function execAsync(cmd: string): Promise<ExecResult> {
  * Try to find supernote_pdf in PATH using `which`
  */
 function findInPath(): string | null {
-    try {
-        const result = childProcess.execSync('which supernote_pdf', { encoding: 'utf8', timeout: 5000 });
-        return result.trim() || null;
-    } catch {
-        return null;
+    for (const binary of ['supernote_sync', 'supernote_pdf']) {
+        try {
+            const result = childProcess.execSync(`which ${binary}`, { encoding: 'utf8', timeout: 5000 });
+            const found = result.trim();
+            if (found) return found;
+        } catch {
+            // keep searching
+        }
     }
+    return null;
 }
 
 /**
@@ -320,6 +330,63 @@ export class PdfConverter {
             } catch {
                 // Ignore cleanup errors
             }
+        }
+    }
+
+    /**
+     * Convert an existing .note file path using CLI smart mode.
+     * Always generates PDF, generates markdown only when recognized text exists.
+     */
+    async convertFilePathWithCliSmartOutput(
+        inputNotePath: string,
+        outputPdfPath: string,
+        normalizeTextWhitespace: boolean = false
+    ): Promise<ConversionResult & { markdownGenerated?: boolean }> {
+        const startTime = Date.now();
+
+        if (this.mode !== 'cli') {
+            return {
+                success: false,
+                error: 'Smart CLI conversion requires converter mode "cli"',
+                conversionTimeMs: Date.now() - startTime,
+            };
+        }
+
+        const cliPath = this.resolvedCliPath ?? findCliTool(this.cliPath);
+        if (!cliPath) {
+            return {
+                success: false,
+                error: 'supernote converter CLI not found. Install with: cargo install supernote_pdf',
+                conversionTimeMs: Date.now() - startTime,
+            };
+        }
+
+        this.resolvedCliPath = cliPath;
+
+        try {
+            const normalizeFlag = normalizeTextWhitespace ? ' --normalize-text-whitespace' : '';
+            const smartBreaksFlag = ' --smart-markdown-breaks';
+            const cmd = `"${cliPath}" --input "${inputNotePath}" --output "${outputPdfPath}" --auto-output${normalizeFlag}${smartBreaksFlag}`;
+            const { stdout, stderr } = await execAsync(cmd);
+            if (stdout) console.debug(`[converter-cli] stdout: ${stdout}`);
+            if (stderr) console.debug(`[converter-cli] stderr: ${stderr}`);
+
+            const markdownPath = outputPdfPath.replace(/\.pdf$/i, '.md');
+            if (!fs.existsSync(outputPdfPath)) {
+                throw new Error(`Expected PDF output missing at ${outputPdfPath}`);
+            }
+
+            return {
+                success: true,
+                markdownGenerated: fs.existsSync(markdownPath),
+                conversionTimeMs: Date.now() - startTime,
+            };
+        } catch (error) {
+            return {
+                success: false,
+                error: `CLI conversion failed: ${error instanceof Error ? error.message : String(error)}`,
+                conversionTimeMs: Date.now() - startTime,
+            };
         }
     }
 

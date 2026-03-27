@@ -1,11 +1,13 @@
 # Supernote Companion
 
-Import Supernote `.note` files as PDFs into your Obsidian vault using the device's Browse & Access feature.
+Import Supernote content (`.note`, `.txt`, `.pdf`) into your Obsidian vault using the device's Browse & Access feature.
 
 ## Features
 
 - **Wireless sync**: Connect to your Supernote over WiFi using Browse & Access mode
 - **Batch import**: Import multiple notes at once with parallel downloads for speed
+- **Smart note conversion**: `.note` files default to smart CLI output (PDF always, Markdown only when recognized text exists)
+- **Broader file sync**: Pull `.txt` and `.pdf` files directly from device folders
 - **PDF conversion**: Convert `.note` files to PDF using the fast Rust-based CLI tool
 - **Folder structure**: Optionally preserve your Supernote folder hierarchy
 - **Duplicate detection**: Skip notes that have already been imported
@@ -19,7 +21,7 @@ Import Supernote `.note` files as PDFs into your Obsidian vault using the device
 
 ### PDF Converter
 
-For reliable PDF conversion, install the `supernote_pdf` CLI tool:
+For reliable conversion, install the CLI tool (`supernote_sync` preferred binary name; `supernote_pdf` remains supported):
 
 ```bash
 # If you have Rust installed

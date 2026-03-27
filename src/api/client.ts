@@ -96,22 +96,25 @@ export class SupernoteAPIClient {
     }
 
     /**
-     * Fetch list of all .note files from the Supernote device
-     * Recursively scans the Note directory
+     * Fetch list of supported Supernote files (.note/.txt/.pdf)
+     * Recursively scans Note and Document directories.
      */
     async fetchNoteFiles(): Promise<{ data: SupernoteFile[] }> {
         try {
-            const allNotes: SupernoteFile[] = [];
-            await this.scanDirectory('/Note', allNotes);
-            return { data: allNotes };
+            const allFiles: SupernoteFile[] = [];
+            await this.scanDirectory('/Note', allFiles);
+            await this.scanDirectory('/Document', allFiles).catch(() => {
+                // Some devices may not expose /Document via Browse & Access.
+            });
+            return { data: allFiles };
         } catch (error) {
-            console.error('Failed to fetch note files:', error);
-            throw new Error(`Failed to fetch notes: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            console.error('Failed to fetch Supernote files:', error);
+            throw new Error(`Failed to fetch files: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
 
     /**
-     * Recursively scan a directory for .note files
+     * Recursively scan a directory for supported files (.note/.txt/.pdf)
      */
     private async scanDirectory(path: string, results: SupernoteFile[]): Promise<void> {
         const response = await this.listDirectory(path);
@@ -120,7 +123,7 @@ export class SupernoteAPIClient {
             if (file.isDirectory) {
                 // Recursively scan subdirectories
                 await this.scanDirectory(file.uri, results);
-            } else if (file.extension === 'note') {
+            } else if (file.extension === 'note' || file.extension === 'txt' || file.extension === 'pdf') {
                 // Convert device file format to our SupernoteFile format
                 results.push(this.convertToSupernoteFile(file));
             }
@@ -167,7 +170,13 @@ export class SupernoteAPIClient {
         // Extract filename from URI and decode properly
         // Note: Supernote uses + for spaces in URLs, but decodeURIComponent doesn't handle +
         const decodedUri = decodeURIComponent(file.uri).replace(/\+/g, ' ');
-        const rawName = decodedUri.split('/').pop()?.replace('.note', '') || 'Untitled';
+        const extension = (file.extension === 'note' || file.extension === 'txt' || file.extension === 'pdf')
+            ? file.extension
+            : 'note';
+        const rawName = decodedUri
+            .split('/')
+            .pop()
+            ?.replace(new RegExp(`\\.${extension}$`, 'i'), '') || 'Untitled';
         // Clean up the name: convert + to spaces (for user-created filenames with spaces)
         const name = rawName
             .replace(/\+/g, ' ')           // + to space (redundant but safe)
@@ -184,6 +193,7 @@ export class SupernoteAPIClient {
             size: file.size,
             modifiedAt: parsedDate.toISOString(),
             createdAt: parsedDate.toISOString(), // Device doesn't provide creation date separately
+            extension,
             pageCount: undefined, // Not available from directory listing
         };
     }
@@ -315,6 +325,7 @@ export class MockSupernoteAPIClient extends SupernoteAPIClient {
             size: 1024000,
             modifiedAt: new Date().toISOString(),
             createdAt: new Date(Date.now() - 86400000).toISOString(),
+            extension: 'note',
             pageCount: 5,
         },
         {
@@ -324,6 +335,7 @@ export class MockSupernoteAPIClient extends SupernoteAPIClient {
             size: 2048000,
             modifiedAt: new Date(Date.now() - 3600000).toISOString(),
             createdAt: new Date(Date.now() - 172800000).toISOString(),
+            extension: 'note',
             pageCount: 12,
         },
         {
@@ -333,6 +345,7 @@ export class MockSupernoteAPIClient extends SupernoteAPIClient {
             size: 512000,
             modifiedAt: new Date(Date.now() - 7200000).toISOString(),
             createdAt: new Date(Date.now() - 604800000).toISOString(),
+            extension: 'note',
             pageCount: 3,
         },
     ];

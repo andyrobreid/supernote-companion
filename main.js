@@ -131,28 +131,30 @@ var _SupernoteAPIClient = class {
     return status.connected;
   }
   /**
-   * Fetch list of all .note files from the Supernote device
-   * Recursively scans the Note directory
+   * Fetch list of supported Supernote files (.note/.txt/.pdf)
+   * Recursively scans Note and Document directories.
    */
   async fetchNoteFiles() {
     try {
-      const allNotes = [];
-      await this.scanDirectory("/Note", allNotes);
-      return { data: allNotes };
+      const allFiles = [];
+      await this.scanDirectory("/Note", allFiles);
+      await this.scanDirectory("/Document", allFiles).catch(() => {
+      });
+      return { data: allFiles };
     } catch (error) {
-      console.error("Failed to fetch note files:", error);
-      throw new Error(`Failed to fetch notes: ${error instanceof Error ? error.message : "Unknown error"}`);
+      console.error("Failed to fetch Supernote files:", error);
+      throw new Error(`Failed to fetch files: ${error instanceof Error ? error.message : "Unknown error"}`);
     }
   }
   /**
-   * Recursively scan a directory for .note files
+   * Recursively scan a directory for supported files (.note/.txt/.pdf)
    */
   async scanDirectory(path3, results) {
     const response = await this.listDirectory(path3);
     for (const file of response.fileList) {
       if (file.isDirectory) {
         await this.scanDirectory(file.uri, results);
-      } else if (file.extension === "note") {
+      } else if (file.extension === "note" || file.extension === "txt" || file.extension === "pdf") {
         results.push(this.convertToSupernoteFile(file));
       }
     }
@@ -188,7 +190,8 @@ var _SupernoteAPIClient = class {
     const dateStr = file.date;
     const parsedDate = new Date(dateStr.replace(" ", "T") + ":00");
     const decodedUri = decodeURIComponent(file.uri).replace(/\+/g, " ");
-    const rawName = ((_a = decodedUri.split("/").pop()) == null ? void 0 : _a.replace(".note", "")) || "Untitled";
+    const extension = file.extension === "note" || file.extension === "txt" || file.extension === "pdf" ? file.extension : "note";
+    const rawName = ((_a = decodedUri.split("/").pop()) == null ? void 0 : _a.replace(new RegExp(`\\.${extension}$`, "i"), "")) || "Untitled";
     const name = rawName.replace(/\+/g, " ").replace(/\s+/g, " ").trim();
     const id = this.generateFileId(file.uri);
     return {
@@ -199,6 +202,7 @@ var _SupernoteAPIClient = class {
       modifiedAt: parsedDate.toISOString(),
       createdAt: parsedDate.toISOString(),
       // Device doesn't provide creation date separately
+      extension,
       pageCount: void 0
       // Not available from directory listing
     };
@@ -301,6 +305,7 @@ var MockSupernoteAPIClient = class extends SupernoteAPIClient {
         size: 1024e3,
         modifiedAt: new Date().toISOString(),
         createdAt: new Date(Date.now() - 864e5).toISOString(),
+        extension: "note",
         pageCount: 5
       },
       {
@@ -310,6 +315,7 @@ var MockSupernoteAPIClient = class extends SupernoteAPIClient {
         size: 2048e3,
         modifiedAt: new Date(Date.now() - 36e5).toISOString(),
         createdAt: new Date(Date.now() - 1728e5).toISOString(),
+        extension: "note",
         pageCount: 12
       },
       {
@@ -319,6 +325,7 @@ var MockSupernoteAPIClient = class extends SupernoteAPIClient {
         size: 512e3,
         modifiedAt: new Date(Date.now() - 72e5).toISOString(),
         createdAt: new Date(Date.now() - 6048e5).toISOString(),
+        extension: "note",
         pageCount: 3
       }
     ];
@@ -4990,12 +4997,17 @@ var path = __toESM(require("path"));
 var os = __toESM(require("os"));
 var CLI_SEARCH_PATHS = [
   // User's home directory
+  path.join(os.homedir(), ".local", "bin", "supernote_sync"),
   path.join(os.homedir(), ".local", "bin", "supernote_pdf"),
+  path.join(os.homedir(), "bin", "supernote_sync"),
   path.join(os.homedir(), "bin", "supernote_pdf"),
   // System paths
+  "/usr/local/bin/supernote_sync",
   "/usr/local/bin/supernote_pdf",
+  "/usr/bin/supernote_sync",
   "/usr/bin/supernote_pdf",
   // Cargo install location
+  path.join(os.homedir(), ".cargo", "bin", "supernote_sync"),
   path.join(os.homedir(), ".cargo", "bin", "supernote_pdf")
 ];
 function execAsync(cmd) {
@@ -5010,12 +5022,16 @@ function execAsync(cmd) {
   });
 }
 function findInPath() {
-  try {
-    const result = childProcess.execSync("which supernote_pdf", { encoding: "utf8", timeout: 5e3 });
-    return result.trim() || null;
-  } catch (e) {
-    return null;
+  for (const binary of ["supernote_sync", "supernote_pdf"]) {
+    try {
+      const result = childProcess.execSync(`which ${binary}`, { encoding: "utf8", timeout: 5e3 });
+      const found = result.trim();
+      if (found)
+        return found;
+    } catch (e) {
+    }
   }
+  return null;
 }
 function findCliTool(configuredPath) {
   if (configuredPath) {
@@ -5185,6 +5201,55 @@ var PdfConverter = class {
         });
       } catch (e) {
       }
+    }
+  }
+  /**
+   * Convert an existing .note file path using CLI smart mode.
+   * Always generates PDF, generates markdown only when recognized text exists.
+   */
+  async convertFilePathWithCliSmartOutput(inputNotePath, outputPdfPath, normalizeTextWhitespace = false) {
+    var _a;
+    const startTime = Date.now();
+    if (this.mode !== "cli") {
+      return {
+        success: false,
+        error: 'Smart CLI conversion requires converter mode "cli"',
+        conversionTimeMs: Date.now() - startTime
+      };
+    }
+    const cliPath = (_a = this.resolvedCliPath) != null ? _a : findCliTool(this.cliPath);
+    if (!cliPath) {
+      return {
+        success: false,
+        error: "supernote converter CLI not found. Install with: cargo install supernote_pdf",
+        conversionTimeMs: Date.now() - startTime
+      };
+    }
+    this.resolvedCliPath = cliPath;
+    try {
+      const normalizeFlag = normalizeTextWhitespace ? " --normalize-text-whitespace" : "";
+      const smartBreaksFlag = " --smart-markdown-breaks";
+      const cmd = `"${cliPath}" --input "${inputNotePath}" --output "${outputPdfPath}" --auto-output${normalizeFlag}${smartBreaksFlag}`;
+      const { stdout, stderr } = await execAsync(cmd);
+      if (stdout)
+        console.debug(`[converter-cli] stdout: ${stdout}`);
+      if (stderr)
+        console.debug(`[converter-cli] stderr: ${stderr}`);
+      const markdownPath = outputPdfPath.replace(/\.pdf$/i, ".md");
+      if (!fs.existsSync(outputPdfPath)) {
+        throw new Error(`Expected PDF output missing at ${outputPdfPath}`);
+      }
+      return {
+        success: true,
+        markdownGenerated: fs.existsSync(markdownPath),
+        conversionTimeMs: Date.now() - startTime
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: `CLI conversion failed: ${error instanceof Error ? error.message : String(error)}`,
+        conversionTimeMs: Date.now() - startTime
+      };
     }
   }
   /**
@@ -7125,7 +7190,7 @@ var NoteImporter = class {
    * Falls back to single-file mode for other import modes or built-in converter.
    */
   async importNotesWithProgress(notes, onProgress) {
-    if (this.importMode === "pdf-only" && this.pdfConverter.canBatchConvert()) {
+    if (this.importMode === "pdf-only" && this.pdfConverter.canBatchConvert() && notes.every((n) => n.extension === "note")) {
       return this.importNotesWithProgressBatch(notes, onProgress);
     }
     return this.importNotesWithProgressSingle(notes, onProgress);
@@ -7271,6 +7336,12 @@ var NoteImporter = class {
    * Import a single note based on import mode
    */
   async importSingleNote(note) {
+    if (note.extension === "txt") {
+      return this.importRawTextFile(note);
+    }
+    if (note.extension === "pdf") {
+      return this.importRawPdfFile(note);
+    }
     switch (this.importMode) {
       case "pdf-only":
         return this.importPdfOnly(note);
@@ -7356,13 +7427,13 @@ ${line}
       if (folderPath) {
         await this.ensureFolderExists(folderPath);
       }
-      tempDir = await this.pdfConverter.createTempDir("sn-cli-single-");
+      tempDir = this.pdfConverter.createTempDir("sn-cli-single-");
       const tempNotePath = path2.join(tempDir, `${note.id}.note`);
       await fs2.promises.writeFile(tempNotePath, Buffer.from(noteData));
       const basePath = this.getVaultBasePath();
       const pdfAbsolutePath = path2.join(basePath, pdfVaultPath);
       const markdownAbsolutePath = path2.join(basePath, markdownVaultPath);
-      const conversionResult = await this.pdfConverter.convertFilePathWithCliPdfAndMarkdown(
+      const conversionResult = await this.pdfConverter.convertFilePathWithCliSmartOutput(
         tempNotePath,
         pdfAbsolutePath,
         this.normalizeCliMarkdownWhitespace
@@ -7370,12 +7441,14 @@ ${line}
       if (!conversionResult.success) {
         throw new Error(conversionResult.error || "Unknown CLI conversion error");
       }
-      await this.normalizeCliMarkdownFrontmatter(markdownAbsolutePath, note, true, pdfFilename);
+      if (conversionResult.markdownGenerated) {
+        await this.normalizeCliMarkdownFrontmatter(markdownAbsolutePath, note, true, pdfFilename);
+      }
       return {
         success: true,
         note,
         pdfPath: pdfVaultPath,
-        markdownPath: markdownVaultPath
+        markdownPath: conversionResult.markdownGenerated ? markdownVaultPath : void 0
       };
     } catch (error) {
       return {
@@ -7484,7 +7557,7 @@ ${line}
         await this.ensureFolderExists(folderPath);
       }
       const noteData = await this.client.downloadNoteFile(note.path);
-      tempDir = await this.pdfConverter.createTempDir("sn-cli-md-only-");
+      tempDir = this.pdfConverter.createTempDir("sn-cli-md-only-");
       const tempNotePath = path2.join(tempDir, `${note.id}.note`);
       await fs2.promises.writeFile(tempNotePath, Buffer.from(noteData));
       const basePath = this.getVaultBasePath();
@@ -7563,6 +7636,12 @@ ${line}
    */
   async updateSingleNote(note, existingPath) {
     var _a;
+    if (note.extension === "txt") {
+      return this.importRawTextFile(note);
+    }
+    if (note.extension === "pdf") {
+      return this.importRawPdfFile(note);
+    }
     if (this.importMode === "pdf-only") {
       return this.importPdfOnly(note);
     }
@@ -7680,6 +7759,59 @@ ${line}
     if (!this.updateOptions)
       return true;
     return this.updateOptions.mode === "all";
+  }
+  buildRawFileVaultPath(note) {
+    const ext = note.extension;
+    const filename = `${note.name}.${ext}`;
+    return this.buildVaultPath(this.notesFolder, note, filename);
+  }
+  async importRawTextFile(note) {
+    try {
+      const data = await this.client.downloadFile(note.path);
+      const text = Buffer.from(data).toString("utf8");
+      const vaultPath = this.buildRawFileVaultPath(note);
+      const folderPath = vaultPath.substring(0, vaultPath.lastIndexOf("/"));
+      if (folderPath) {
+        await this.ensureFolderExists(folderPath);
+      }
+      const existing = this.vault.getAbstractFileByPath(vaultPath);
+      if (existing instanceof import_obsidian9.TFile) {
+        await this.vault.modify(existing, text);
+      } else {
+        await this.vault.create(vaultPath, text);
+      }
+      return { success: true, note, notePath: vaultPath };
+    } catch (error) {
+      return {
+        success: false,
+        note,
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
+  }
+  async importRawPdfFile(note) {
+    try {
+      const data = await this.client.downloadFile(note.path);
+      const pdfData = data.slice(0);
+      const vaultPath = this.buildRawFileVaultPath(note);
+      const folderPath = vaultPath.substring(0, vaultPath.lastIndexOf("/"));
+      if (folderPath) {
+        await this.ensureFolderExists(folderPath);
+      }
+      const existing = this.vault.getAbstractFileByPath(vaultPath);
+      if (existing instanceof import_obsidian9.TFile) {
+        await this.vault.modifyBinary(existing, pdfData);
+      } else {
+        await this.vault.createBinary(vaultPath, pdfData);
+      }
+      return { success: true, note, pdfPath: vaultPath };
+    } catch (error) {
+      return {
+        success: false,
+        note,
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
   }
   /**
    * Ensure a folder exists in the vault

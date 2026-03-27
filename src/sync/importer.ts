@@ -138,7 +138,11 @@ export class NoteImporter {
         onProgress: ProgressCallback
     ): Promise<number> {
         // Use batch mode for pdf-only with CLI converter
-        if (this.importMode === 'pdf-only' && this.pdfConverter.canBatchConvert()) {
+        if (
+            this.importMode === 'pdf-only'
+            && this.pdfConverter.canBatchConvert()
+            && notes.every(n => n.extension === 'note')
+        ) {
             return this.importNotesWithProgressBatch(notes, onProgress);
         }
 
@@ -352,6 +356,13 @@ export class NoteImporter {
      * Import a single note based on import mode
      */
     async importSingleNote(note: SupernoteFile): Promise<ImportResult> {
+        if (note.extension === 'txt') {
+            return this.importRawTextFile(note);
+        }
+        if (note.extension === 'pdf') {
+            return this.importRawPdfFile(note);
+        }
+
         switch (this.importMode) {
             case 'pdf-only':
                 return this.importPdfOnly(note);
@@ -467,7 +478,7 @@ export class NoteImporter {
                 await this.ensureFolderExists(folderPath);
             }
 
-            tempDir = await this.pdfConverter.createTempDir('sn-cli-single-');
+            tempDir = this.pdfConverter.createTempDir('sn-cli-single-');
             const tempNotePath = path.join(tempDir, `${note.id}.note`);
             await fs.promises.writeFile(tempNotePath, Buffer.from(noteData));
 
@@ -475,7 +486,7 @@ export class NoteImporter {
             const pdfAbsolutePath = path.join(basePath, pdfVaultPath);
             const markdownAbsolutePath = path.join(basePath, markdownVaultPath);
 
-            const conversionResult = await this.pdfConverter.convertFilePathWithCliPdfAndMarkdown(
+            const conversionResult = await this.pdfConverter.convertFilePathWithCliSmartOutput(
                 tempNotePath,
                 pdfAbsolutePath,
                 this.normalizeCliMarkdownWhitespace
@@ -485,13 +496,15 @@ export class NoteImporter {
                 throw new Error(conversionResult.error || 'Unknown CLI conversion error');
             }
 
-            await this.normalizeCliMarkdownFrontmatter(markdownAbsolutePath, note, true, pdfFilename);
+            if (conversionResult.markdownGenerated) {
+                await this.normalizeCliMarkdownFrontmatter(markdownAbsolutePath, note, true, pdfFilename);
+            }
 
             return {
                 success: true,
                 note,
                 pdfPath: pdfVaultPath,
-                markdownPath: markdownVaultPath,
+                markdownPath: conversionResult.markdownGenerated ? markdownVaultPath : undefined,
             };
         } catch (error) {
             return {
@@ -629,7 +642,7 @@ export class NoteImporter {
 
             // Try CLI markdown-only path first (if converter mode/path supports it)
             const noteData = await this.client.downloadNoteFile(note.path);
-            tempDir = await this.pdfConverter.createTempDir('sn-cli-md-only-');
+            tempDir = this.pdfConverter.createTempDir('sn-cli-md-only-');
             const tempNotePath = path.join(tempDir, `${note.id}.note`);
             await fs.promises.writeFile(tempNotePath, Buffer.from(noteData));
 
@@ -728,6 +741,13 @@ export class NoteImporter {
      * Update a single note with selective update support
      */
     async updateSingleNote(note: SupernoteFile, existingPath: string): Promise<ImportResult> {
+        if (note.extension === 'txt') {
+            return this.importRawTextFile(note);
+        }
+        if (note.extension === 'pdf') {
+            return this.importRawPdfFile(note);
+        }
+
         // For PDF-centric modes, just re-import artifacts
         if (this.importMode === 'pdf-only') {
             return this.importPdfOnly(note);
@@ -890,6 +910,68 @@ export class NoteImporter {
     private shouldUpdatePdf(): boolean {
         if (!this.updateOptions) return true;
         return this.updateOptions.mode === 'all';
+    }
+
+    private buildRawFileVaultPath(note: SupernoteFile): string {
+        const ext = note.extension;
+        const filename = `${note.name}.${ext}`;
+        return this.buildVaultPath(this.notesFolder, note, filename);
+    }
+
+    private async importRawTextFile(note: SupernoteFile): Promise<ImportResult> {
+        try {
+            const data = await this.client.downloadFile(note.path);
+            const text = Buffer.from(data).toString('utf8');
+            const vaultPath = this.buildRawFileVaultPath(note);
+
+            const folderPath = vaultPath.substring(0, vaultPath.lastIndexOf('/'));
+            if (folderPath) {
+                await this.ensureFolderExists(folderPath);
+            }
+
+            const existing = this.vault.getAbstractFileByPath(vaultPath);
+            if (existing instanceof TFile) {
+                await this.vault.modify(existing, text);
+            } else {
+                await this.vault.create(vaultPath, text);
+            }
+
+            return { success: true, note, notePath: vaultPath };
+        } catch (error) {
+            return {
+                success: false,
+                note,
+                error: error instanceof Error ? error.message : String(error),
+            };
+        }
+    }
+
+    private async importRawPdfFile(note: SupernoteFile): Promise<ImportResult> {
+        try {
+            const data = await this.client.downloadFile(note.path);
+            const pdfData = data.slice(0);
+            const vaultPath = this.buildRawFileVaultPath(note);
+
+            const folderPath = vaultPath.substring(0, vaultPath.lastIndexOf('/'));
+            if (folderPath) {
+                await this.ensureFolderExists(folderPath);
+            }
+
+            const existing = this.vault.getAbstractFileByPath(vaultPath);
+            if (existing instanceof TFile) {
+                await this.vault.modifyBinary(existing, pdfData);
+            } else {
+                await this.vault.createBinary(vaultPath, pdfData);
+            }
+
+            return { success: true, note, pdfPath: vaultPath };
+        } catch (error) {
+            return {
+                success: false,
+                note,
+                error: error instanceof Error ? error.message : String(error),
+            };
+        }
     }
 
     /**

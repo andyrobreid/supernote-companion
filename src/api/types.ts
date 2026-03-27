@@ -1,6 +1,8 @@
 /**
  * Represents a Supernote .note file from the device
  */
+export type SupernoteFileKind = 'note' | 'txt' | 'pdf';
+
 export interface SupernoteFile {
     id: string;
     name: string;
@@ -8,6 +10,7 @@ export interface SupernoteFile {
     size: number;           // File size in bytes
     modifiedAt: string;     // ISO date string
     createdAt: string;      // ISO date string
+    extension: SupernoteFileKind;
     pageCount?: number;     // Number of pages (if available)
 }
 
