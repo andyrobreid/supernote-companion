@@ -327,6 +327,7 @@ export class MockSupernoteAPIClient extends SupernoteAPIClient {
             createdAt: new Date(Date.now() - 86400000).toISOString(),
             extension: 'note',
             pageCount: 5,
+            keywords: ['Meeting', 'Work Notes'],
         },
         {
             id: 'note-002',

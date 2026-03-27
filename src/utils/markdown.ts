@@ -1,4 +1,5 @@
 import { SupernoteFile, ExportOptions } from '../api/types';
+import { normalizeKeywords } from './keywords';
 
 /**
  * Generate markdown content for a Supernote note entry
@@ -50,6 +51,15 @@ export function generateFrontmatter(
     // PDF attachment path (if exists)
     if (pdfVaultPath) {
         lines.push(`pdf_attachment: "${escapeYamlString(pdfVaultPath)}"`);
+    }
+
+    // Source keywords (normalized) - kept separate from Obsidian tags
+    const keywords = normalizeKeywords(note.keywords);
+    if (keywords.length > 0) {
+        lines.push('keywords:');
+        for (const keyword of keywords) {
+            lines.push(`  - ${keyword}`);
+        }
     }
     
     // Default tags
@@ -273,7 +283,7 @@ export function updateFrontmatter(
     const existingFields = parseSimpleYaml(existingYaml);
     
     // Known fields that come from Supernote
-    const knownFields = ['name', 'supernote_id', 'source', 'created', 'modified', 'pages', 'size', 'pdf_attachment', 'tags'];
+    const knownFields = ['name', 'supernote_id', 'source', 'created', 'modified', 'pages', 'size', 'pdf_attachment', 'keywords', 'tags'];
     
     // Determine which fields to update
     let fieldsToProcess: string[];

@@ -12,6 +12,7 @@ export interface SupernoteFile {
     createdAt: string;      // ISO date string
     extension: SupernoteFileKind;
     pageCount?: number;     // Number of pages (if available)
+    keywords?: string[];    // Source keywords (if available from note metadata)
 }
 
 /**
@@ -31,6 +32,7 @@ export interface LocalNoteFile {
     sourcePath: string;     // Original path on Supernote device
     mtime: number;          // Last modified timestamp
     pdfPath?: string;       // Path to associated PDF attachment
+    keywords?: string[];    // Parsed frontmatter keywords
 }
 
 /**
@@ -59,7 +61,8 @@ export type FrontmatterField =
     | 'date' 
     | 'pageCount'
     | 'size'
-    | 'tags';
+    | 'tags'
+    | 'keywords';
 
 /**
  * Options for how arrays should be merged during updates
@@ -75,6 +78,7 @@ export interface UpdateOptions {
     preserveCustomFields: boolean;
     arrayMergeStrategy: {
         tags: MergeStrategy;
+        keywords?: MergeStrategy;
     };
     exportOptions: ExportOptions;
 }

@@ -306,7 +306,8 @@ var MockSupernoteAPIClient = class extends SupernoteAPIClient {
         modifiedAt: new Date().toISOString(),
         createdAt: new Date(Date.now() - 864e5).toISOString(),
         extension: "note",
-        pageCount: 5
+        pageCount: 5,
+        keywords: ["Meeting", "Work Notes"]
       },
       {
         id: "note-002",
@@ -5850,6 +5851,51 @@ Make sure Browse & Access is enabled on your Supernote.`);
 // src/ui/sync-status-modal.ts
 var import_obsidian3 = require("obsidian");
 
+// src/utils/keywords.ts
+function normalizeKeywordToken(raw) {
+  const lowered = raw.trim().toLowerCase();
+  if (!lowered)
+    return null;
+  let cleaned = "";
+  let prevSep = false;
+  for (const ch of lowered) {
+    if (ch >= "a" && ch <= "z" || ch >= "0" && ch <= "9") {
+      cleaned += ch;
+      prevSep = false;
+    } else if (!prevSep && cleaned.length > 0) {
+      cleaned += " ";
+      prevSep = true;
+    }
+  }
+  const normalized = cleaned.trim();
+  if (!normalized)
+    return null;
+  const words = normalized.split(/\s+/).filter(Boolean);
+  if (words.length === 0 || words.length > 2)
+    return null;
+  return words.join("-");
+}
+function normalizeKeywords(input) {
+  if (!input || input.length === 0)
+    return [];
+  const deduped = /* @__PURE__ */ new Set();
+  for (const raw of input) {
+    for (const token of raw.split(/[\n\r\t,;|]/g)) {
+      const normalized = normalizeKeywordToken(token);
+      if (normalized)
+        deduped.add(normalized);
+    }
+  }
+  return Array.from(deduped).sort((a, b) => a.localeCompare(b));
+}
+function keywordsDiffer(a, b) {
+  const na = normalizeKeywords(a);
+  const nb = normalizeKeywords(b);
+  if (na.length !== nb.length)
+    return true;
+  return na.some((value, index) => value !== nb[index]);
+}
+
 // src/utils/markdown.ts
 function generateMarkdown(note, options, pdfVaultPath, thumbnailBase64) {
   const frontmatter = generateFrontmatter(note, pdfVaultPath);
@@ -5874,6 +5920,13 @@ function generateFrontmatter(note, pdfVaultPath) {
   lines.push(`size: "${formatFileSize(note.size)}"`);
   if (pdfVaultPath) {
     lines.push(`pdf_attachment: "${escapeYamlString(pdfVaultPath)}"`);
+  }
+  const keywords = normalizeKeywords(note.keywords);
+  if (keywords.length > 0) {
+    lines.push("keywords:");
+    for (const keyword of keywords) {
+      lines.push(`  - ${keyword}`);
+    }
   }
   lines.push(`tags:`);
   lines.push(`  - supernote`);
@@ -5991,7 +6044,7 @@ ${existingContent}`;
   }
   const existingYaml = frontmatterMatch[1];
   const existingFields = parseSimpleYaml(existingYaml);
-  const knownFields = ["name", "supernote_id", "source", "created", "modified", "pages", "size", "pdf_attachment", "tags"];
+  const knownFields = ["name", "supernote_id", "source", "created", "modified", "pages", "size", "pdf_attachment", "keywords", "tags"];
   let fieldsToProcess;
   if (fieldsToUpdate && fieldsToUpdate.length > 0) {
     fieldsToProcess = fieldsToUpdate;
@@ -6907,7 +6960,8 @@ async function scanLocalNotes(vault, folderPath) {
           id,
           sourcePath,
           mtime: file.stat.mtime,
-          pdfPath: frontmatter.pdf_attachment ? String(frontmatter.pdf_attachment) : void 0
+          pdfPath: frontmatter.pdf_attachment ? String(frontmatter.pdf_attachment) : void 0,
+          keywords: normalizeKeywords(Array.isArray(frontmatter.keywords) ? frontmatter.keywords : void 0)
         };
         localNotes.set(id, local);
         if (sourcePath.startsWith("/Note/") && sourcePath.endsWith(".note")) {
@@ -7007,6 +7061,12 @@ function parseFrontmatter(content) {
 }
 
 // src/sync/status.ts
+function shouldMarkAsUpdated(note, localFile) {
+  const remoteModified = new Date(note.modifiedAt).getTime();
+  const localModified = localFile.mtime;
+  const keywordChanged = keywordsDiffer(note.keywords, localFile.keywords);
+  return remoteModified > localModified || keywordChanged;
+}
 function calculateSyncStatus(remoteNotes, localNotes, existingPdfNames) {
   const status = {
     new: [],
@@ -7020,9 +7080,7 @@ function calculateSyncStatus(remoteNotes, localNotes, existingPdfNames) {
     if (!localFile && !existingPdf) {
       status.new.push(note);
     } else if (localFile) {
-      const remoteModified = new Date(note.modifiedAt).getTime();
-      const localModified = localFile.mtime;
-      if (remoteModified > localModified) {
+      if (shouldMarkAsUpdated(note, localFile)) {
         status.updated.push(note);
       } else {
         status.synced.push(note);
@@ -7061,7 +7119,8 @@ function splitByModificationStatus(notes, localNotes, lastSync) {
   const unmodified = [];
   for (const note of notes) {
     const localFile = localNotes.get(note.id);
-    if (localFile && localFile.mtime > lastSync) {
+    const keywordChanged = localFile ? keywordsDiffer(note.keywords, localFile.keywords) : false;
+    if (localFile && (localFile.mtime > lastSync || keywordChanged)) {
       modified.push(note);
     } else {
       unmodified.push(note);
@@ -7706,7 +7765,8 @@ ${line}
       created: new Date(note.createdAt).toISOString().split("T")[0],
       modified: new Date(note.modifiedAt).toISOString().split("T")[0],
       pages: note.pageCount,
-      size: `${Math.round(note.size / 1024)} KB`
+      size: `${Math.round(note.size / 1024)} KB`,
+      keywords: normalizeKeywords(note.keywords)
     };
     if (pdfVaultPath) {
       newFrontmatter.pdf_attachment = pdfVaultPath;

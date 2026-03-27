@@ -1,5 +1,6 @@
 import { Vault, TFile } from 'obsidian';
 import { LocalNoteFile } from '../api/types';
+import { normalizeKeywords } from '../utils/keywords';
 
 /**
  * Scan the vault for existing synced Supernote files.
@@ -48,6 +49,9 @@ export async function scanLocalNotes(
                     sourcePath,
                     mtime: file.stat.mtime,
                     pdfPath: frontmatter.pdf_attachment ? String(frontmatter.pdf_attachment) : undefined,
+                    keywords: normalizeKeywords(Array.isArray(frontmatter.keywords)
+                        ? (frontmatter.keywords as string[])
+                        : undefined),
                 };
 
                 // Primary key: explicit supernote_id in frontmatter

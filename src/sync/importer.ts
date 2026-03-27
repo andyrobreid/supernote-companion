@@ -4,6 +4,7 @@ import { PdfConverter } from '../api/converter';
 import { SupernoteFile, ExportOptions, UpdateOptions } from '../api/types';
 import { ImportMode, ConverterMode } from '../settings';
 import { generateMarkdown, generateFilename, generatePdfFilename, updateFrontmatter } from '../utils/markdown';
+import { normalizeKeywords } from '../utils/keywords';
 import { parseFrontmatter } from './matcher';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -836,6 +837,7 @@ export class NoteImporter {
             modified: new Date(note.modifiedAt).toISOString().split('T')[0],
             pages: note.pageCount,
             size: `${Math.round(note.size / 1024)} KB`,
+            keywords: normalizeKeywords(note.keywords),
         };
 
         if (pdfVaultPath) {

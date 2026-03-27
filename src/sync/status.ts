@@ -1,5 +1,13 @@
 import { SupernoteFile, SyncStatus, LocalNoteFile } from '../api/types';
-import { TFile } from 'obsidian';
+import type { TFile } from 'obsidian';
+import { keywordsDiffer } from '../utils/keywords';
+
+export function shouldMarkAsUpdated(note: SupernoteFile, localFile: LocalNoteFile): boolean {
+    const remoteModified = new Date(note.modifiedAt).getTime();
+    const localModified = localFile.mtime;
+    const keywordChanged = keywordsDiffer(note.keywords, localFile.keywords);
+    return remoteModified > localModified || keywordChanged;
+}
 
 /**
  * Calculate the sync status by comparing remote notes with local files
@@ -26,12 +34,8 @@ export function calculateSyncStatus(
             // Note doesn't exist locally
             status.new.push(note);
         } else if (localFile) {
-            // Compare timestamps to detect updates
-            const remoteModified = new Date(note.modifiedAt).getTime();
-            const localModified = localFile.mtime;
-
-            if (remoteModified > localModified) {
-                // Remote has been modified more recently
+            if (shouldMarkAsUpdated(note, localFile)) {
+                // Remote has been modified more recently, or keywords changed
                 status.updated.push(note);
             } else {
                 // Already in sync
@@ -103,7 +107,7 @@ export function filterByModificationStatus(
         const localFile = localNotes.get(note.id);
         if (!localFile) return true; // New notes always included
         
-        const isModified = localFile.mtime > lastSync;
+        const isModified = localFile.mtime > lastSync || keywordsDiffer(note.keywords, localFile.keywords);
         return includeModified ? true : !isModified;
     });
 }
@@ -121,7 +125,9 @@ export function splitByModificationStatus(
 
     for (const note of notes) {
         const localFile = localNotes.get(note.id);
-        if (localFile && localFile.mtime > lastSync) {
+        const keywordChanged = localFile ? keywordsDiffer(note.keywords, localFile.keywords) : false;
+
+        if (localFile && (localFile.mtime > lastSync || keywordChanged)) {
             modified.push(note);
         } else {
             unmodified.push(note);
